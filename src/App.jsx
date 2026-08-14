@@ -8,16 +8,35 @@ import {
   FileText, CheckCircle, XCircle, Shuffle, Upload, Star, Sparkles, Send, 
   Archive, Check, Camera, ChevronDown, ArrowLeft, MoreVertical, Copy, 
   AlignLeft, Download, Eye, EyeOff, Calendar as CalendarIcon, PanelRightClose, 
-  PanelRightOpen, ArrowRight, XSquare, PlusCircle, Quote, Calculator, LogIn, Settings
+  PanelRightOpen, ArrowRight, XSquare, PlusCircle, Quote, Calculator, LogIn
 } from 'lucide-react';
 
-const firebaseConfig = typeof __firebase_config !== 'undefined' && __firebase_config ? JSON.parse(__firebase_config) : {};
+// ----------------------------------------------------------------------
+// 🔥 FIREBASE SETUP: Replace these values with your Firebase Config! 🔥
+// You can find this in Firebase Console > Project Settings > Web App
+// ----------------------------------------------------------------------
+const localFirebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_AUTH_DOMAIN",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_STORAGE_BUCKET",
+  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+
+const firebaseConfig = typeof __firebase_config !== 'undefined' && __firebase_config 
+  ? JSON.parse(__firebase_config) 
+  : localFirebaseConfig;
+
 let app, auth, db, provider;
 try {
-  app = initializeApp(firebaseConfig);
-  auth = getAuth(app);
-  db = getFirestore(app);
-  provider = new GoogleAuthProvider();
+  // Only initialize if we have actual keys or are in the Canvas environment
+  if (firebaseConfig.apiKey !== "YOUR_API_KEY" || typeof __firebase_config !== 'undefined') {
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
+    provider = new GoogleAuthProvider();
+  }
 } catch (e) {
   console.warn('Firebase initialization error', e);
 }
@@ -732,6 +751,9 @@ export default function App() {
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
 
+  const [authError, setAuthError] = useState('');
+
+  // Real-time Clock
   useEffect(() => {
     if (!auth) return;
     const initAuth = async () => {
@@ -761,11 +783,16 @@ export default function App() {
   }, []);
 
   const handleGoogleLogin = async () => {
-    if (!auth || !provider) return;
+    if (!auth || !provider) {
+      setAuthError("Firebase keys missing. Please paste your config at the top of App.jsx.");
+      return;
+    }
     try {
+      setAuthError('');
       await signInWithPopup(auth, provider);
     } catch (error) {
       console.error("Google Sign-in error:", error);
+      setAuthError("Sign-in failed. Please try again.");
     }
   };
 
@@ -1612,9 +1639,12 @@ export default function App() {
                 <p className="text-sm font-bold text-slate-500 dark:text-slate-400 mt-1 mb-4">{profile.role}</p>
 
                 {(!user || user.isAnonymous) ? (
-                   <button onClick={handleGoogleLogin} className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-colors">
-                      <LogIn size={16} /> Sign in with Google
-                   </button>
+                   <div className="w-full">
+                      <button onClick={handleGoogleLogin} className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-colors">
+                         <LogIn size={16} /> Sign in with Google
+                      </button>
+                      {authError && <p className="text-xs text-red-500 font-bold mt-2 leading-tight">{authError}</p>}
+                   </div>
                 ) : (
                    <button onClick={handleLogout} className="w-full py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-colors">
                       Sign Out
