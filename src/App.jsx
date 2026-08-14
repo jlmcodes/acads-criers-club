@@ -211,45 +211,58 @@ const dispatchSyncStatus = (status, msg = '') => {
 };
 
 function useFirestoreState(defaultValue, key, uid) {
+  // 1. Create a highly stable string version of the default value to prevent infinite loop wipes
+  const defaultStr = React.useMemo(() => JSON.stringify(defaultValue), []);
+
   const [state, setState] = React.useState(() => {
-     if (!uid) return defaultValue;
+     if (!uid) return JSON.parse(defaultStr);
      const cached = window.localStorage.getItem(`acads_cache_${uid}_${key}`);
      if (cached) {
         try { return JSON.parse(cached); } catch(e) {}
      }
-     return defaultValue;
+     return JSON.parse(defaultStr);
   });
-  const [isLoaded, setIsLoaded] = React.useState(false);
-  const currentUidRef = React.useRef(uid);
   
+  const [isLoaded, setIsLoaded] = React.useState(false);
   const appId = typeof __app_id !== 'undefined' && __app_id ? __app_id : 'acads-criers-club';
 
+  // 2. THE CRITICAL FIX: Reload local data immediately the millisecond the user logs in
   React.useEffect(() => {
-    currentUidRef.current = uid;
     if (!uid) {
-       setIsLoaded(true);
+       setState(JSON.parse(defaultStr));
+       setIsLoaded(false);
        return;
     }
-    if (!db) {
+    const cached = window.localStorage.getItem(`acads_cache_${uid}_${key}`);
+    if (cached) {
+       try { setState(JSON.parse(cached)); } catch(e) {}
+    } else {
+       setState(JSON.parse(defaultStr));
+    }
+  }, [uid, key, defaultStr]);
+
+  // 3. Connect to the Cloud
+  React.useEffect(() => {
+    if (!uid || !db) {
        setIsLoaded(true);
        return;
     }
 
     const docRef = doc(db, 'artifacts', appId, 'users', uid, key, 'data');
-    
     dispatchSyncStatus('syncing');
+
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
         const rawData = docSnap.data().value;
         let parsed = rawData;
         try { parsed = typeof rawData === 'string' ? JSON.parse(rawData) : rawData; } catch(e) {}
+        
         setState(parsed);
         window.localStorage.setItem(`acads_cache_${uid}_${key}`, typeof rawData === 'string' ? rawData : JSON.stringify(rawData));
         dispatchSyncStatus('synced');
       } else {
-        // Cloud is empty. Only migrate local data if it actually contains meaningful modifications (prevents new devices from wiping the cloud)
+        // Cloud is empty. Safely push local data without wiping.
         const backup = window.localStorage.getItem(`acads_cache_${uid}_${key}`);
-        const defaultStr = JSON.stringify(defaultValue);
         
         if (backup && backup !== defaultStr && backup !== "[]" && backup !== "{}") {
            setDoc(docRef, { value: backup }, { merge: true })
@@ -267,7 +280,7 @@ function useFirestoreState(defaultValue, key, uid) {
     });
 
     return () => unsubscribe();
-  }, [uid, key, appId]);
+  }, [uid, key, appId, defaultStr]);
 
   const setPersistentState = React.useCallback((newValue) => {
     setState((prevState) => {
@@ -277,7 +290,7 @@ function useFirestoreState(defaultValue, key, uid) {
          const serialized = JSON.stringify(valueToStore);
          window.localStorage.setItem(`acads_cache_${uid}_${key}`, serialized);
          
-         if (db && currentUidRef.current === uid) {
+         if (db) {
             dispatchSyncStatus('syncing');
             const docRef = doc(db, 'artifacts', appId, 'users', uid, key, 'data');
             setDoc(docRef, { value: serialized }, { merge: true })
