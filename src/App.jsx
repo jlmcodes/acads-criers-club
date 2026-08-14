@@ -8,7 +8,8 @@ import {
   FileText, CheckCircle, XCircle, Shuffle, Upload, Star, Sparkles, Send, 
   Archive, Check, Camera, ChevronDown, ArrowLeft, MoreVertical, Copy, 
   AlignLeft, Download, Eye, EyeOff, Calendar as CalendarIcon, PanelRightClose, 
-  PanelRightOpen, ArrowRight, XSquare, PlusCircle, Quote, Calculator, LogIn
+  PanelRightOpen, ArrowRight, XSquare, PlusCircle, Quote, Calculator, LogIn,
+  Cloud, CloudOff, RefreshCw
 } from 'lucide-react';
 
 // ----------------------------------------------------------------------
@@ -205,71 +206,63 @@ const DEFAULT_GWA_SCALE = [
 const isInAppBrowser = /FBAN|FBAV|Instagram|LinkedInApp|Snapchat|Line/i.test(navigator.userAgent || '');
 
 // Custom Hook to sync data with Firebase Cloud Firestore + Local Storage Fallback
+const dispatchSyncStatus = (status, msg = '') => {
+   window.dispatchEvent(new CustomEvent('acads_sync_status', { detail: { status, msg } }));
+};
+
 function useFirestoreState(defaultValue, key, uid) {
-  const [state, setState] = React.useState(defaultValue);
+  const [state, setState] = React.useState(() => {
+     if (!uid) return defaultValue;
+     const cached = window.localStorage.getItem(`acads_cache_${uid}_${key}`);
+     if (cached) {
+        try { return JSON.parse(cached); } catch(e) {}
+     }
+     return defaultValue;
+  });
   const [isLoaded, setIsLoaded] = React.useState(false);
-  const isLoadedRef = React.useRef(false);
   const currentUidRef = React.useRef(uid);
-  const usingLocalFallbackRef = React.useRef(false);
   
   const appId = typeof __app_id !== 'undefined' && __app_id ? __app_id : 'acads-criers-club';
 
   React.useEffect(() => {
     currentUidRef.current = uid;
-    isLoadedRef.current = false;
-    setIsLoaded(false);
-    usingLocalFallbackRef.current = false;
-
     if (!uid) {
-      setState(defaultValue);
-      isLoadedRef.current = true;
-      setIsLoaded(true);
-      return;
+       setIsLoaded(true);
+       return;
     }
-
-    // 1. Immediately check local backup while cloud loads to prevent blank screens
-    const localCache = window.localStorage.getItem(`acads_cache_${uid}_${key}`);
-    if (localCache) {
-       try { setState(JSON.parse(localCache)); } catch(e) {}
-    } else {
-       setState(defaultValue);
-    }
-
     if (!db) {
-       usingLocalFallbackRef.current = true;
-       isLoadedRef.current = true;
        setIsLoaded(true);
        return;
     }
 
-    // 2. Connect to Firebase Cloud
     const docRef = doc(db, 'artifacts', appId, 'users', uid, key, 'data');
+    
+    dispatchSyncStatus('syncing');
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
-        // Cloud has data -> load it and update local backup
         const rawData = docSnap.data().value;
         let parsed = rawData;
         try { parsed = typeof rawData === 'string' ? JSON.parse(rawData) : rawData; } catch(e) {}
         setState(parsed);
         window.localStorage.setItem(`acads_cache_${uid}_${key}`, typeof rawData === 'string' ? rawData : JSON.stringify(rawData));
+        dispatchSyncStatus('synced');
       } else {
-        // Cloud is empty -> if we have a local backup, upload it to cloud immediately!
+        // Cloud is empty. Only migrate local data if it actually contains meaningful modifications (prevents new devices from wiping the cloud)
         const backup = window.localStorage.getItem(`acads_cache_${uid}_${key}`);
-        if (backup) {
-           try {
-              setState(JSON.parse(backup));
-              setDoc(docRef, { value: backup }).catch(e => console.warn("Could not sync backup to cloud", e));
-           } catch(e) { setState(defaultValue); }
+        const defaultStr = JSON.stringify(defaultValue);
+        
+        if (backup && backup !== defaultStr && backup !== "[]" && backup !== "{}") {
+           setDoc(docRef, { value: backup }, { merge: true })
+             .then(() => dispatchSyncStatus('synced'))
+             .catch(e => dispatchSyncStatus('error', e.message));
         } else {
-           setState(defaultValue);
+           dispatchSyncStatus('synced');
         }
       }
-      isLoadedRef.current = true;
       setIsLoaded(true);
     }, (err) => {
-      console.error(`Firebase error for ${key}, falling back to local storage:`, err);
-      usingLocalFallbackRef.current = true;
-      isLoadedRef.current = true;
+      console.error(`Firebase sync error for ${key}:`, err);
+      dispatchSyncStatus('error', err.message);
       setIsLoaded(true);
     });
 
@@ -280,22 +273,19 @@ function useFirestoreState(defaultValue, key, uid) {
     setState((prevState) => {
       const valueToStore = typeof newValue === 'function' ? newValue(prevState) : newValue;
 
-      // Always save a bulletproof backup locally no matter what
       if (uid) {
-         window.localStorage.setItem(`acads_cache_${uid}_${key}`, JSON.stringify(valueToStore));
-      }
-
-      // If connected to cloud and not blocked, sync it
-      if (uid && db && isLoadedRef.current && currentUidRef.current === uid && !usingLocalFallbackRef.current) {
-         const docRef = doc(db, 'artifacts', appId, 'users', uid, key, 'data');
-         try {
-           const serialized = JSON.stringify(valueToStore);
-           setDoc(docRef, { value: serialized }).catch(e => {
-              console.error(`Error saving ${key} to cloud:`, e);
-              usingLocalFallbackRef.current = true; // Fallback to local if write fails
-           });
-         } catch (e) {
-           console.error(`Error stringifying ${key}:`, e);
+         const serialized = JSON.stringify(valueToStore);
+         window.localStorage.setItem(`acads_cache_${uid}_${key}`, serialized);
+         
+         if (db && currentUidRef.current === uid) {
+            dispatchSyncStatus('syncing');
+            const docRef = doc(db, 'artifacts', appId, 'users', uid, key, 'data');
+            setDoc(docRef, { value: serialized }, { merge: true })
+               .then(() => dispatchSyncStatus('synced'))
+               .catch((e) => {
+                  console.error(`Cloud save error for ${key}:`, e);
+                  dispatchSyncStatus('error', e.message);
+               });
          }
       }
       return valueToStore;
@@ -894,6 +884,13 @@ export default function App() {
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
 
   const [authError, setAuthError] = useState('');
+  const [syncState, setSyncState] = useState({ status: 'synced', msg: '' });
+
+  useEffect(() => {
+     const handler = (e) => setSyncState(e.detail);
+     window.addEventListener('acads_sync_status', handler);
+     return () => window.removeEventListener('acads_sync_status', handler);
+  }, []);
 
   // Real-time Clock
   useEffect(() => {
@@ -1834,6 +1831,14 @@ export default function App() {
            </div>
            
            <div className="flex items-center gap-4">
+            {user && !user.isAnonymous && (
+               <div title={syncState.msg || "Cloud Sync Status"} className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold border transition-colors shadow-sm ${syncState.status === 'error' ? 'bg-red-50 text-red-600 border-red-200 dark:bg-red-900/30 dark:border-red-800' : syncState.status === 'syncing' ? 'bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-900/30 dark:border-amber-800' : 'bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-900/30 dark:border-emerald-800'}`}>
+                 {syncState.status === 'error' && <CloudOff size={16} />}
+                 {syncState.status === 'syncing' && <RefreshCw size={16} className="animate-spin" />}
+                 {syncState.status === 'synced' && <Cloud size={16} />}
+                 <span className="hidden md:inline">{syncState.status === 'error' ? 'Sync Failed' : syncState.status === 'syncing' ? 'Syncing...' : 'Cloud Synced'}</span>
+               </div>
+            )}
             <div className={`flex items-center gap-3 px-5 py-2.5 rounded-xl text-sm font-bold border shadow-sm transition-colors ${isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-700'}`}>
               <Clock size={16} className="text-indigo-500" /> 
               <span>
