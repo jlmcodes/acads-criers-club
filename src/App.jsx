@@ -799,7 +799,11 @@ export default function App() {
 
   // Replaced local storage with secure Firebase Cloud syncing
   const [profile, setProfile] = useFirestoreState(
-    { name: 'Future CPA', role: 'Accountancy Student', avatar: null },
+    { 
+      name: user?.displayName || 'Future CPA', 
+      role: 'Accountancy Student', 
+      avatar: user?.photoURL || null 
+    },
     'profile',
     currentUid
   );
@@ -850,13 +854,6 @@ export default function App() {
     
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
-      if (u && !u.isAnonymous) {
-        setProfile(prev => ({
-          ...prev,
-          name: u.displayName || prev.name,
-          avatar: u.photoURL || prev.avatar
-        }));
-      }
     });
     return () => unsubscribe();
   }, []);
