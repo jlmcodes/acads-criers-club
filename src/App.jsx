@@ -202,6 +202,37 @@ const DEFAULT_GWA_SCALE = [
   { min: 0, max: 59.99, gwa: '3.00' },
 ];
 
+// Custom Hook to save data to Local Storage tied to the user's ID
+function usePersistentState(defaultValue, key, uid) {
+  const [value, setValue] = React.useState(() => {
+    // If no user is logged in, just return the default empty state
+    if (!uid) return defaultValue;
+
+    // Check if we have saved data for this specific user
+    const stickyValue = window.localStorage.getItem(`acads_${uid}_${key}`);
+    return stickyValue !== null ? JSON.parse(stickyValue) : defaultValue;
+  });
+
+  React.useEffect(() => {
+    // Whenever the value changes, save it to Local Storage
+    if (uid) {
+      window.localStorage.setItem(`acads_${uid}_${key}`, JSON.stringify(value));
+    }
+  }, [key, value, uid]);
+
+  // When the user changes (logs in/out), reload their specific data
+  React.useEffect(() => {
+    if (uid) {
+      const stickyValue = window.localStorage.getItem(`acads_${uid}_${key}`);
+      setValue(stickyValue !== null ? JSON.parse(stickyValue) : defaultValue);
+    } else {
+      setValue(defaultValue);
+    }
+  }, [uid, key]);
+
+  return [value, setValue];
+}
+
 const AddFlashcardModal = ({ decks, setDecks, modalData, closeModal }) => {
   const [cardType, setCardType] = useState('basic');
   const [q, setQ] = useState('');
@@ -728,25 +759,38 @@ export default function App() {
   const [activeModal, setActiveModal] = useState(null); 
   const [modalData, setModalData] = useState(null);
 
-  const [profile, setProfile] = useState({ name: 'Future CPA', role: 'Accountancy Student', avatar: null });
-  const [manifestations, setManifestations] = useState([]);
+  // Get the user's ID (assuming you have a 'user' state from Firebase auth)
+  const currentUid = user ? user.uid : null;
+
+  // Replace standard useState with our new usePersistentState
+  const [profile, setProfile] = usePersistentState(
+    { name: 'Future CPA', role: 'Accountancy Student', avatar: null },
+    'profile',
+    currentUid
+  );
+
+  const [manifestations, setManifestations] = usePersistentState([], 'manifestations', currentUid);
   const [manInput, setManInput] = useState('');
   
-  const [reminders, setReminders] = useState([]);
+  const [reminders, setReminders] = usePersistentState([], 'reminders', currentUid);
   const [newReminder, setNewReminder] = useState('');
   
-  const [schedule, setSchedule] = useState([]);
-  const [deadlines, setDeadlines] = useState([]); 
+  const [schedule, setSchedule] = usePersistentState([], 'schedule', currentUid);
+  const [deadlines, setDeadlines] = usePersistentState([], 'deadlines', currentUid); 
   
-  const [decks, setDecks] = useState([]);
+  const [decks, setDecks] = usePersistentState([], 'decks', currentUid);
   const [activeDeckId, setActiveDeckId] = useState(null);
   
-  const [grades, setGrades] = useState({ subjects: [], periods: [], assessments: [], scale: DEFAULT_GWA_SCALE });
+  const [grades, setGrades] = usePersistentState(
+    { subjects: [], periods: [], assessments: [], scale: DEFAULT_GWA_SCALE },
+    'grades',
+    currentUid
+  );
   
-  const [quizzes, setQuizzes] = useState([]);
+  const [quizzes, setQuizzes] = usePersistentState([], 'quizzes', currentUid);
   const [activeQuizSession, setActiveQuizSession] = useState(null);
   
-  const [notes, setNotes] = useState([]);
+  const [notes, setNotes] = usePersistentState([], 'notes', currentUid);
 
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
