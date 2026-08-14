@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signOut } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { 
   BookOpen, Folder, Bell, ChevronLeft, ChevronRight, Clock, GraduationCap, 
@@ -872,16 +872,29 @@ export default function App() {
     } catch (error) {
       console.error("Google Sign-in error:", error);
       
-      // Provide a more specific error message based on what went wrong
       let errorMsg = "Sign-in failed. Please try again.";
-      if (error.code === 'auth/popup-closed-by-user') {
+      
+      // Handle Safari Private Browsing blocking the internal database
+      if (error.message && (error.message.includes('Database is closing/hidden') || error.message.includes('indexedDB'))) {
+         errorMsg = "Safari Private Browsing blocks Google Login. Please switch to a normal Safari tab.";
+      } 
+      // Handle mobile popup blockers by attempting a redirect instead
+      else if (error.code === 'auth/popup-blocked' || error.code === 'auth/operation-not-supported-in-this-environment') {
+         try {
+            await signInWithRedirect(auth, provider);
+            return; // Stop here as the page will redirect to Google
+         } catch (redirectErr) {
+            errorMsg = "Login blocked. Please open the app directly in your normal browser.";
+         }
+      } 
+      else if (error.code === 'auth/popup-closed-by-user') {
          errorMsg = "You closed the popup before signing in.";
-      } else if (error.code === 'auth/unauthorized-domain') {
+      } 
+      else if (error.code === 'auth/unauthorized-domain') {
          errorMsg = "Domain not authorized. Please add it in Firebase Console.";
-      } else if (error.code === 'auth/operation-not-supported-in-this-environment') {
-         errorMsg = "Popups are blocked in this preview. Please run the app locally (npm run dev) to sign in.";
-      } else {
-         errorMsg = error.message; // Show the exact technical error if it's something else
+      } 
+      else {
+         errorMsg = error.message; 
       }
       
       setAuthError(errorMsg);
