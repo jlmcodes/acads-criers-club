@@ -16,12 +16,12 @@ import {
 // You can find this in Firebase Console > Project Settings > Web App
 // ----------------------------------------------------------------------
 const localFirebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_AUTH_DOMAIN",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_STORAGE_BUCKET",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyDdE4EvCBWap2FCCMFKef9_r0JAV0faT3s",
+  authDomain: "acads-criers-club.firebaseapp.com",
+  projectId: "acads-criers-club",
+  storageBucket: "acads-criers-club.firebasestorage.app",
+  messagingSenderId: "607225586157",
+  appId: "1:607225586157:web:35fdf42977fbfd208187e4"
 };
 
 const firebaseConfig = typeof __firebase_config !== 'undefined' && __firebase_config 
