@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { 
   BookOpen, Folder, Bell, ChevronLeft, ChevronRight, Clock, GraduationCap, 
   StickyNote, Trash2, Plus, Save, Moon, Sun, User, Play, Edit, Menu, X, 
@@ -202,37 +202,70 @@ const DEFAULT_GWA_SCALE = [
   { min: 0, max: 59.99, gwa: '3.00' },
 ];
 
-// Custom Hook to save data to Local Storage tied to the user's ID safely
-function usePersistentState(defaultValue, key, uid) {
-  const [value, setValue] = React.useState(() => {
-    if (!uid) return defaultValue;
-    const stickyValue = window.localStorage.getItem(`acads_${uid}_${key}`);
-    return stickyValue !== null ? JSON.parse(stickyValue) : defaultValue;
-  });
+const isInAppBrowser = /FBAN|FBAV|Instagram|LinkedInApp|Snapchat|Line/i.test(navigator.userAgent || '');
 
-  // Track the UID that the current state belongs to
-  const [stateUid, setStateUid] = React.useState(uid);
-
-  // If the user logs in/out, synchronously load the correct data BEFORE rendering
-  // This prevents the empty default state from overwriting the saved data.
-  if (uid !== stateUid) {
-    let nextValue = defaultValue;
-    if (uid) {
-      const stickyValue = window.localStorage.getItem(`acads_${uid}_${key}`);
-      nextValue = stickyValue !== null ? JSON.parse(stickyValue) : defaultValue;
-    }
-    setValue(nextValue);
-    setStateUid(uid);
-  }
+// Custom Hook to sync data with Firebase Cloud Firestore
+function useFirestoreState(defaultValue, key, uid) {
+  const [state, setState] = React.useState(defaultValue);
+  const [isLoaded, setIsLoaded] = React.useState(false);
+  
+  const appId = typeof __app_id !== 'undefined' ? __app_id : 'acads-criers-club';
 
   React.useEffect(() => {
-    // Only save to storage if we have a valid logged-in user
-    if (uid) {
-      window.localStorage.setItem(`acads_${uid}_${key}`, JSON.stringify(value));
+    if (!uid || !db) {
+      setState(defaultValue);
+      setIsLoaded(true);
+      return;
     }
-  }, [key, value, uid]);
+    
+    // Connect directly to the user's secure document in the cloud
+    const docRef = doc(db, 'artifacts', appId, 'users', uid, key, 'data');
+    
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setState(docSnap.data().value);
+      } else {
+        // MIGRATION: Check if they have old local data from before this cloud upgrade
+        const localData = window.localStorage.getItem(`acads_${uid}_${key}`);
+        if (localData !== null) {
+           try {
+             const parsed = JSON.parse(localData);
+             setState(parsed);
+             // Upload their old local data to the cloud permanently
+             setDoc(docRef, { value: parsed }).catch(console.error); 
+             // Clean up local storage so we only use the cloud from now on
+             window.localStorage.removeItem(`acads_${uid}_${key}`); 
+           } catch(e) {
+             setState(defaultValue);
+           }
+        } else {
+           setState(defaultValue);
+        }
+      }
+      setIsLoaded(true);
+    }, (err) => {
+      console.error(`Error loading ${key}:`, err);
+      setIsLoaded(true);
+    });
 
-  return [value, setValue];
+    return () => unsubscribe();
+  }, [uid, key]);
+
+  const setPersistentState = React.useCallback(async (newValue) => {
+    const valueToStore = typeof newValue === 'function' ? newValue(state) : newValue;
+    setState(valueToStore); // Instant UI update (No lag)
+    
+    if (uid && db && isLoaded) {
+       const docRef = doc(db, 'artifacts', appId, 'users', uid, key, 'data');
+       try {
+         await setDoc(docRef, { value: valueToStore });
+       } catch (e) {
+         console.error(`Error saving ${key} to cloud:`, e);
+       }
+    }
+  }, [uid, key, isLoaded, state]);
+
+  return [state, setPersistentState];
 }
 
 const AddFlashcardModal = ({ decks, setDecks, modalData, closeModal }) => {
@@ -764,35 +797,35 @@ export default function App() {
   // Get the user's ID (assuming you have a 'user' state from Firebase auth)
   const currentUid = user ? user.uid : null;
 
-  // Replace standard useState with our new usePersistentState
-  const [profile, setProfile] = usePersistentState(
+  // Replaced local storage with secure Firebase Cloud syncing
+  const [profile, setProfile] = useFirestoreState(
     { name: 'Future CPA', role: 'Accountancy Student', avatar: null },
     'profile',
     currentUid
   );
 
-  const [manifestations, setManifestations] = usePersistentState([], 'manifestations', currentUid);
+  const [manifestations, setManifestations] = useFirestoreState([], 'manifestations', currentUid);
   const [manInput, setManInput] = useState('');
   
-  const [reminders, setReminders] = usePersistentState([], 'reminders', currentUid);
+  const [reminders, setReminders] = useFirestoreState([], 'reminders', currentUid);
   const [newReminder, setNewReminder] = useState('');
   
-  const [schedule, setSchedule] = usePersistentState([], 'schedule', currentUid);
-  const [deadlines, setDeadlines] = usePersistentState([], 'deadlines', currentUid); 
+  const [schedule, setSchedule] = useFirestoreState([], 'schedule', currentUid);
+  const [deadlines, setDeadlines] = useFirestoreState([], 'deadlines', currentUid); 
   
-  const [decks, setDecks] = usePersistentState([], 'decks', currentUid);
+  const [decks, setDecks] = useFirestoreState([], 'decks', currentUid);
   const [activeDeckId, setActiveDeckId] = useState(null);
   
-  const [grades, setGrades] = usePersistentState(
+  const [grades, setGrades] = useFirestoreState(
     { subjects: [], periods: [], assessments: [], scale: DEFAULT_GWA_SCALE },
     'grades',
     currentUid
   );
   
-  const [quizzes, setQuizzes] = usePersistentState([], 'quizzes', currentUid);
+  const [quizzes, setQuizzes] = useFirestoreState([], 'quizzes', currentUid);
   const [activeQuizSession, setActiveQuizSession] = useState(null);
   
-  const [notes, setNotes] = usePersistentState([], 'notes', currentUid);
+  const [notes, setNotes] = useFirestoreState([], 'notes', currentUid);
 
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
@@ -1631,6 +1664,12 @@ export default function App() {
   return (
     <div className={`w-full h-screen overflow-hidden flex font-sans antialiased transition-colors duration-300 ${isDarkMode ? 'dark bg-[#0f172a] text-gray-100' : 'bg-[#f8fafc] text-slate-900'}`}>
       
+      {isInAppBrowser && (
+         <div className="absolute top-0 left-0 w-full z-[100] bg-rose-500 text-white text-xs md:text-sm font-bold text-center px-4 py-2.5 shadow-md flex items-center justify-center gap-2">
+            ⚠️ <span>You are using an in-app browser. Google Sign-In is blocked here. Please tap the menu (•••) and select <b>"Open in System Browser"</b> or <b>"Open in Safari/Chrome"</b> to log in.</span>
+         </div>
+      )}
+
       <aside className={`w-64 h-full flex flex-col border-r transition-colors duration-300 relative z-20 shrink-0 ${isDarkMode ? 'bg-[#1e293b] border-slate-700' : 'bg-white border-slate-200'}`}>
         <div className="h-24 flex items-center px-6 border-b dark:border-slate-700 shrink-0">
           <div className="flex items-center gap-3">
