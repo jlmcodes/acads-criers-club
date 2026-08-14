@@ -792,7 +792,20 @@ export default function App() {
       await signInWithPopup(auth, provider);
     } catch (error) {
       console.error("Google Sign-in error:", error);
-      setAuthError("Sign-in failed. Please try again.");
+      
+      // Provide a more specific error message based on what went wrong
+      let errorMsg = "Sign-in failed. Please try again.";
+      if (error.code === 'auth/popup-closed-by-user') {
+         errorMsg = "You closed the popup before signing in.";
+      } else if (error.code === 'auth/unauthorized-domain') {
+         errorMsg = "Domain not authorized. Please add it in Firebase Console.";
+      } else if (error.code === 'auth/operation-not-supported-in-this-environment') {
+         errorMsg = "Popups are blocked in this preview. Please run the app locally (npm run dev) to sign in.";
+      } else {
+         errorMsg = error.message; // Show the exact technical error if it's something else
+      }
+      
+      setAuthError(errorMsg);
     }
   };
 
