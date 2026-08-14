@@ -808,6 +808,19 @@ export default function App() {
     currentUid
   );
 
+  // Auto-sync Google profile info if the user hasn't customized it yet
+  useEffect(() => {
+    if (user && !user.isAnonymous) {
+      if (profile.name === 'Future CPA' && user.displayName) {
+         setProfile(prev => ({ ...prev, name: user.displayName }));
+      }
+      if (!profile.avatar && user.photoURL) {
+         setProfile(prev => ({ ...prev, avatar: user.photoURL }));
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, profile.name, profile.avatar]);
+
   const [manifestations, setManifestations] = useFirestoreState([], 'manifestations', currentUid);
   const [manInput, setManInput] = useState('');
   
@@ -1788,13 +1801,15 @@ export default function App() {
                 <button onClick={() => setActiveModal('profile')} className="absolute top-4 right-4 p-2 rounded-lg text-slate-400 hover:text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 transition-colors"><Edit size={16}/></button>
                 
                 <div className="w-24 h-24 mx-auto bg-gradient-to-br from-indigo-100 to-purple-100 dark:from-slate-700 dark:to-slate-600 rounded-full mb-4 shadow-inner flex items-center justify-center overflow-hidden border-4 border-white dark:border-slate-800">
-                   {profile.avatar ? (
-                     <img src={profile.avatar} alt="Profile" className="w-full h-full object-cover" />
+                   {profile.avatar || (user && !user.isAnonymous && user.photoURL) ? (
+                     <img src={profile.avatar || user.photoURL} alt="Profile" className="w-full h-full object-cover" />
                    ) : (
                      <User size={40} className="text-indigo-300 dark:text-slate-400" />
                    )}
                 </div>
-                <h3 className="text-xl font-black text-slate-800 dark:text-white leading-tight">{profile.name}</h3>
+                <h3 className="text-xl font-black text-slate-800 dark:text-white leading-tight">
+                   {profile.name === 'Future CPA' && user && !user.isAnonymous && user.displayName ? user.displayName : profile.name}
+                </h3>
                 <p className="text-sm font-bold text-slate-500 dark:text-slate-400 mt-1 mb-4">{profile.role}</p>
 
                 {(!user || user.isAnonymous) ? (
