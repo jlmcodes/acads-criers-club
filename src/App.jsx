@@ -209,7 +209,7 @@ function useFirestoreState(defaultValue, key, uid) {
   const [state, setState] = React.useState(defaultValue);
   const [isLoaded, setIsLoaded] = React.useState(false);
   
-  const appId = typeof __app_id !== 'undefined' ? __app_id : 'acads-criers-club';
+  const appId = typeof __app_id !== 'undefined' && __app_id ? __app_id : 'acads-criers-club';
 
   React.useEffect(() => {
     if (!uid || !db) {
@@ -223,7 +223,21 @@ function useFirestoreState(defaultValue, key, uid) {
     
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
-        setState(docSnap.data().value);
+        const rawData = docSnap.data().value;
+        let parsed = rawData;
+        
+        try {
+          // Parse stringified data to avoid Firestore schema limitations
+          parsed = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
+        } catch(e) {}
+        
+        setState(currentState => {
+           // Deep compare to prevent infinite re-rendering cycles
+           if (JSON.stringify(currentState) !== JSON.stringify(parsed)) {
+               return parsed;
+           }
+           return currentState;
+        });
       } else {
         // MIGRATION: Check if they have old local data from before this cloud upgrade
         const localData = window.localStorage.getItem(`acads_${uid}_${key}`);
@@ -232,14 +246,19 @@ function useFirestoreState(defaultValue, key, uid) {
              const parsed = JSON.parse(localData);
              setState(parsed);
              // Upload their old local data to the cloud permanently
-             setDoc(docRef, { value: parsed }).catch(console.error); 
+             setDoc(docRef, { value: JSON.stringify(parsed) }).catch(console.error); 
              // Clean up local storage so we only use the cloud from now on
              window.localStorage.removeItem(`acads_${uid}_${key}`); 
            } catch(e) {
              setState(defaultValue);
            }
         } else {
-           setState(defaultValue);
+           setState(currentState => {
+               if (JSON.stringify(currentState) !== JSON.stringify(defaultValue)) {
+                   return defaultValue;
+               }
+               return currentState;
+           });
         }
       }
       setIsLoaded(true);
@@ -249,21 +268,26 @@ function useFirestoreState(defaultValue, key, uid) {
     });
 
     return () => unsubscribe();
-  }, [uid, key]);
+  }, [uid, key, appId]); // Added appId to dependency array
 
-  const setPersistentState = React.useCallback(async (newValue) => {
-    const valueToStore = typeof newValue === 'function' ? newValue(state) : newValue;
-    setState(valueToStore); // Instant UI update (No lag)
-    
-    if (uid && db && isLoaded) {
-       const docRef = doc(db, 'artifacts', appId, 'users', uid, key, 'data');
-       try {
-         await setDoc(docRef, { value: valueToStore });
-       } catch (e) {
-         console.error(`Error saving ${key} to cloud:`, e);
-       }
-    }
-  }, [uid, key, isLoaded, state]);
+  const setPersistentState = React.useCallback((newValue) => {
+    // Functional state update prevents stale closures
+    setState((prevState) => {
+      const valueToStore = typeof newValue === 'function' ? newValue(prevState) : newValue;
+      
+      if (uid && db) {
+         const docRef = doc(db, 'artifacts', appId, 'users', uid, key, 'data');
+         try {
+           // Stringify to bypass Firestore constraints on nested arrays or undefined object values
+           const serialized = JSON.stringify(valueToStore);
+           setDoc(docRef, { value: serialized }).catch(e => console.error(`Error saving ${key} to cloud:`, e));
+         } catch (e) {
+           console.error(`Error stringifying ${key}:`, e);
+         }
+      }
+      return valueToStore;
+    });
+  }, [uid, key, appId]);
 
   return [state, setPersistentState];
 }
@@ -1013,17 +1037,18 @@ export default function App() {
             <button onClick={closeModal} className="absolute top-4 right-4 p-2 rounded-full hover:bg-black/10 transition-colors"><X size={20}/></button>
           )}
           
+          {}
           {activeModal === 'profile' && (
             <div>
               <h2 className="text-2xl font-black mb-6 flex items-center gap-2"><User size={24} className="text-indigo-500"/> Edit Profile</h2>
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-bold text-slate-500 mb-1">Display Name</label>
-                  <input type="text" value={profile.name} onChange={e => setProfile({...profile, name: e.target.value})} className="w-full p-3 rounded-xl border bg-transparent border-slate-600 focus:border-indigo-500 outline-none" />
+                  <input type="text" value={profile.name} onChange={e => { const val = e.target.value; setProfile(prev => ({...prev, name: val})) }} className="w-full p-3 rounded-xl border bg-transparent border-slate-600 focus:border-indigo-500 outline-none" />
                 </div>
                 <div>
                   <label className="block text-sm font-bold text-slate-500 mb-1">Role / Course</label>
-                  <input type="text" value={profile.role} onChange={e => setProfile({...profile, role: e.target.value})} className="w-full p-3 rounded-xl border bg-transparent border-slate-600 focus:border-indigo-500 outline-none" />
+                  <input type="text" value={profile.role} onChange={e => { const val = e.target.value; setProfile(prev => ({...prev, role: val})) }} className="w-full p-3 rounded-xl border bg-transparent border-slate-600 focus:border-indigo-500 outline-none" />
                 </div>
                 <div>
                   <label className="block text-sm font-bold text-slate-500 mb-1">Avatar Image</label>
@@ -1031,12 +1056,35 @@ export default function App() {
                      const file = e.target.files[0];
                      if (file) {
                        const reader = new FileReader();
-                       reader.onloadend = () => setProfile({...profile, avatar: reader.result});
+                       reader.onload = (event) => {
+                         const img = new Image();
+                         img.onload = () => {
+                           // Compress image to ensure it easily fits within the 1MB Firestore limit
+                           const canvas = document.createElement('canvas');
+                           const ctx = canvas.getContext('2d');
+                           const maxSize = 200;
+                           let width = img.width;
+                           let height = img.height;
+                           if (width > height && width > maxSize) {
+                             height *= maxSize / width;
+                             width = maxSize;
+                           } else if (height > maxSize) {
+                             width *= maxSize / height;
+                             height = maxSize;
+                           }
+                           canvas.width = width;
+                           canvas.height = height;
+                           ctx.drawImage(img, 0, 0, width, height);
+                           const compressedBase64 = canvas.toDataURL('image/jpeg', 0.8);
+                           setProfile(prev => ({...prev, avatar: compressedBase64}));
+                         };
+                         img.src = event.target.result;
+                       };
                        reader.readAsDataURL(file);
                      }
                   }} className="w-full p-2 rounded-xl border bg-transparent border-slate-600 text-sm focus:border-indigo-500 outline-none mb-2" />
                   <p className="text-xs font-bold text-slate-500 mb-1">Or paste Image URL:</p>
-                  <input type="text" placeholder="https://..." value={profile.avatar || ''} onChange={e => setProfile({...profile, avatar: e.target.value})} className="w-full p-3 rounded-xl border bg-transparent border-slate-600 focus:border-indigo-500 outline-none" />
+                  <input type="text" placeholder="https://..." value={profile.avatar || ''} onChange={e => { const val = e.target.value; setProfile(prev => ({...prev, avatar: val})) }} className="w-full p-3 rounded-xl border bg-transparent border-slate-600 focus:border-indigo-500 outline-none" />
                 </div>
                 <button onClick={closeModal} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold mt-4 hover:bg-indigo-700 transition-colors">Save Profile</button>
               </div>
