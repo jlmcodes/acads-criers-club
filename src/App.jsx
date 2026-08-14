@@ -204,83 +204,96 @@ const DEFAULT_GWA_SCALE = [
 
 const isInAppBrowser = /FBAN|FBAV|Instagram|LinkedInApp|Snapchat|Line/i.test(navigator.userAgent || '');
 
-// Custom Hook to sync data with Firebase Cloud Firestore
+// Custom Hook to sync data with Firebase Cloud Firestore + Local Storage Fallback
 function useFirestoreState(defaultValue, key, uid) {
   const [state, setState] = React.useState(defaultValue);
   const [isLoaded, setIsLoaded] = React.useState(false);
+  const isLoadedRef = React.useRef(false);
+  const currentUidRef = React.useRef(uid);
+  const usingLocalFallbackRef = React.useRef(false);
   
   const appId = typeof __app_id !== 'undefined' && __app_id ? __app_id : 'acads-criers-club';
 
   React.useEffect(() => {
-    if (!uid || !db) {
+    currentUidRef.current = uid;
+    isLoadedRef.current = false;
+    setIsLoaded(false);
+    usingLocalFallbackRef.current = false;
+
+    if (!uid) {
       setState(defaultValue);
+      isLoadedRef.current = true;
       setIsLoaded(true);
       return;
     }
-    
-    // Connect directly to the user's secure document in the cloud
+
+    // 1. Immediately check local backup while cloud loads to prevent blank screens
+    const localCache = window.localStorage.getItem(`acads_cache_${uid}_${key}`);
+    if (localCache) {
+       try { setState(JSON.parse(localCache)); } catch(e) {}
+    } else {
+       setState(defaultValue);
+    }
+
+    if (!db) {
+       usingLocalFallbackRef.current = true;
+       isLoadedRef.current = true;
+       setIsLoaded(true);
+       return;
+    }
+
+    // 2. Connect to Firebase Cloud
     const docRef = doc(db, 'artifacts', appId, 'users', uid, key, 'data');
-    
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
+        // Cloud has data -> load it and update local backup
         const rawData = docSnap.data().value;
         let parsed = rawData;
-        
-        try {
-          // Parse stringified data to avoid Firestore schema limitations
-          parsed = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
-        } catch(e) {}
-        
-        setState(currentState => {
-           // Deep compare to prevent infinite re-rendering cycles
-           if (JSON.stringify(currentState) !== JSON.stringify(parsed)) {
-               return parsed;
-           }
-           return currentState;
-        });
+        try { parsed = typeof rawData === 'string' ? JSON.parse(rawData) : rawData; } catch(e) {}
+        setState(parsed);
+        window.localStorage.setItem(`acads_cache_${uid}_${key}`, typeof rawData === 'string' ? rawData : JSON.stringify(rawData));
       } else {
-        // MIGRATION: Check if they have old local data from before this cloud upgrade
-        const localData = window.localStorage.getItem(`acads_${uid}_${key}`);
-        if (localData !== null) {
+        // Cloud is empty -> if we have a local backup, upload it to cloud immediately!
+        const backup = window.localStorage.getItem(`acads_cache_${uid}_${key}`);
+        if (backup) {
            try {
-             const parsed = JSON.parse(localData);
-             setState(parsed);
-             // Upload their old local data to the cloud permanently
-             setDoc(docRef, { value: JSON.stringify(parsed) }).catch(console.error); 
-             // Clean up local storage so we only use the cloud from now on
-             window.localStorage.removeItem(`acads_${uid}_${key}`); 
-           } catch(e) {
-             setState(defaultValue);
-           }
+              setState(JSON.parse(backup));
+              setDoc(docRef, { value: backup }).catch(e => console.warn("Could not sync backup to cloud", e));
+           } catch(e) { setState(defaultValue); }
         } else {
-           setState(currentState => {
-               if (JSON.stringify(currentState) !== JSON.stringify(defaultValue)) {
-                   return defaultValue;
-               }
-               return currentState;
-           });
+           setState(defaultValue);
         }
       }
+      isLoadedRef.current = true;
       setIsLoaded(true);
     }, (err) => {
-      console.error(`Error loading ${key}:`, err);
+      console.error(`Firebase error for ${key}, falling back to local storage:`, err);
+      usingLocalFallbackRef.current = true;
+      isLoadedRef.current = true;
       setIsLoaded(true);
     });
 
     return () => unsubscribe();
-  }, [uid, key, appId]); // Added appId to dependency array
+  }, [uid, key, appId]);
 
   const setPersistentState = React.useCallback((newValue) => {
-    // Functional state update prevents stale closures
     setState((prevState) => {
       const valueToStore = typeof newValue === 'function' ? newValue(prevState) : newValue;
-      
-      if (uid && db) {
+
+      // Always save a bulletproof backup locally no matter what
+      if (uid) {
+         window.localStorage.setItem(`acads_cache_${uid}_${key}`, JSON.stringify(valueToStore));
+      }
+
+      // If connected to cloud and not blocked, sync it
+      if (uid && db && isLoadedRef.current && currentUidRef.current === uid && !usingLocalFallbackRef.current) {
          const docRef = doc(db, 'artifacts', appId, 'users', uid, key, 'data');
          try {
-           // Stringify to bypass Firestore constraints on nested arrays or undefined object values
            const serialized = JSON.stringify(valueToStore);
-           setDoc(docRef, { value: serialized }).catch(e => console.error(`Error saving ${key} to cloud:`, e));
+           setDoc(docRef, { value: serialized }).catch(e => {
+              console.error(`Error saving ${key} to cloud:`, e);
+              usingLocalFallbackRef.current = true; // Fallback to local if write fails
+           });
          } catch (e) {
            console.error(`Error stringifying ${key}:`, e);
          }
@@ -289,7 +302,7 @@ function useFirestoreState(defaultValue, key, uid) {
     });
   }, [uid, key, appId]);
 
-  return [state, setPersistentState];
+  return [state, setPersistentState, isLoaded];
 }
 
 const AddFlashcardModal = ({ decks, setDecks, modalData, closeModal }) => {
@@ -821,8 +834,8 @@ export default function App() {
   // Get the user's ID (assuming you have a 'user' state from Firebase auth)
   const currentUid = user ? user.uid : null;
 
-  // Replaced local storage with secure Firebase Cloud syncing
-  const [profile, setProfile] = useFirestoreState(
+  // Replaced local storage with secure Firebase Cloud syncing + Fail-safe local backup
+  const [profile, setProfile, isProfileLoaded] = useFirestoreState(
     { 
       name: user?.displayName || 'Future CPA', 
       role: 'Accountancy Student', 
@@ -832,18 +845,27 @@ export default function App() {
     currentUid
   );
 
-  // Auto-sync Google profile info if the user hasn't customized it yet
+  // Auto-sync Google profile info ONLY after the database has finished loading to prevent overwriting
   useEffect(() => {
-    if (user && !user.isAnonymous) {
+    if (user && !user.isAnonymous && isProfileLoaded) {
+      let needsUpdate = false;
+      let newProfile = { ...profile };
+
       if (profile.name === 'Future CPA' && user.displayName) {
-         setProfile(prev => ({ ...prev, name: user.displayName }));
+         newProfile.name = user.displayName;
+         needsUpdate = true;
       }
       if (!profile.avatar && user.photoURL) {
-         setProfile(prev => ({ ...prev, avatar: user.photoURL }));
+         newProfile.avatar = user.photoURL;
+         needsUpdate = true;
+      }
+
+      if (needsUpdate) {
+         setProfile(newProfile);
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, profile.name, profile.avatar]);
+  }, [user, profile.name, profile.avatar, isProfileLoaded]);
 
   const [manifestations, setManifestations] = useFirestoreState([], 'manifestations', currentUid);
   const [manInput, setManInput] = useState('');
