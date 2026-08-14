@@ -1096,14 +1096,14 @@ export default function App() {
 
           {activeModal === 'createDeck' && (
              <div>
-                <h2 className="text-xl font-black mb-6">Create Flashcard Deck</h2>
+                <h2 className="text-xl font-black mb-6">{modalData?.parentId ? 'Create Subdeck' : 'Create Flashcard Deck'}</h2>
                 <form onSubmit={(e) => {
                   e.preventDefault();
-                  setDecks([...decks, { id: generateId(), name: e.target.deckName.value, cards: [] }]);
+                  setDecks([...decks, { id: generateId(), name: e.target.deckName.value, cards: [], parentId: modalData?.parentId || null }]);
                   closeModal();
                 }}>
-                  <input required name="deckName" autoFocus type="text" placeholder="e.g., RFBT Article 1156-1160" className="w-full p-3 rounded-xl border bg-transparent border-slate-600 focus:border-indigo-500 outline-none mb-4" />
-                  <button type="submit" className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700">Create Deck</button>
+                  <input required name="deckName" autoFocus type="text" placeholder={modalData?.parentId ? "e.g., Chapter 1" : "e.g., RFBT Article 1156-1160"} className="w-full p-3 rounded-xl border bg-transparent border-slate-600 focus:border-indigo-500 outline-none mb-4" />
+                  <button type="submit" className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700">{modalData?.parentId ? 'Create Subdeck' : 'Create Deck'}</button>
                 </form>
              </div>
           )}
@@ -1227,19 +1227,68 @@ export default function App() {
   };
 
   const renderFlashcards = () => {
+    const handleDeleteDeck = (e, deckId) => {
+      e.stopPropagation();
+      const idsToDelete = new Set([deckId]);
+      let added = true;
+      while (added) {
+         added = false;
+         decks.forEach(d => {
+            if (idsToDelete.has(d.parentId) && !idsToDelete.has(d.id)) {
+               idsToDelete.add(d.id);
+               added = true;
+            }
+         });
+      }
+      setDecks(decks.filter(d => !idsToDelete.has(d.id)));
+      if (activeDeckId && idsToDelete.has(activeDeckId)) {
+         setActiveDeckId(null);
+      }
+    };
+
     if (activeDeckId) {
       const deck = decks.find(d => d.id === activeDeckId);
       if(!deck) { setActiveDeckId(null); return null; }
+      const subdecks = decks.filter(d => d.parentId === activeDeckId);
 
       return (
         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
            <div className="flex items-center gap-4 mb-8">
-             <button onClick={() => setActiveDeckId(null)} className="p-2 bg-slate-200 dark:bg-slate-700 rounded-xl hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors"><ArrowLeft size={20}/></button>
+             <button onClick={() => setActiveDeckId(deck.parentId || null)} className="p-2 bg-slate-200 dark:bg-slate-700 rounded-xl hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors"><ArrowLeft size={20}/></button>
              <h2 className="text-3xl font-black">{deck.name}</h2>
              <span className="ml-auto bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-400 px-3 py-1 rounded-full text-sm font-bold">{deck.cards.length} Cards</span>
            </div>
 
-           <div className="flex justify-between items-center mb-6">
+           {/* Subdecks Section */}
+           <div className="mb-8">
+              <div className="flex justify-between items-center mb-4">
+                 <h3 className="text-xl font-bold">Subdecks</h3>
+                 <button onClick={() => { setActiveModal('createDeck'); setModalData({ parentId: deck.id }); }} className="px-4 py-2 bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-lg font-bold flex items-center gap-2 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors"><Plus size={16}/> Add Subdeck</button>
+              </div>
+              {subdecks.length > 0 ? (
+                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                   {subdecks.map(sDeck => (
+                     <div key={sDeck.id} onClick={() => setActiveDeckId(sDeck.id)} className={`p-4 rounded-xl border shadow-sm cursor-pointer transition-all hover:scale-[1.02] hover:shadow-md flex items-center gap-4 ${isDarkMode ? 'bg-slate-800/50 border-slate-700 hover:border-indigo-500/50' : 'bg-slate-50 border-slate-200 hover:border-indigo-300'}`}>
+                       <div className="w-10 h-10 rounded-lg bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                         <Folder size={18} />
+                       </div>
+                       <div className="flex-1 min-w-0">
+                         <h4 className="font-bold truncate text-sm">{sDeck.name}</h4>
+                         <p className="text-xs text-slate-500 font-medium">{sDeck.cards?.length || 0} Cards</p>
+                       </div>
+                       <button onClick={(e) => handleDeleteDeck(e, sDeck.id)} className="text-slate-400 hover:text-red-500 p-2 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"><Trash2 size={16}/></button>
+                     </div>
+                   ))}
+                 </div>
+              ) : (
+                 <div className="p-6 border-2 border-dashed rounded-xl border-slate-300 dark:border-slate-700 text-center opacity-70">
+                   <p className="text-sm font-bold text-slate-500">No subdecks. You can create one to organize further.</p>
+                 </div>
+              )}
+           </div>
+
+           {/* Cards Section */}
+           <div className="flex justify-between items-center mb-6 pt-6 border-t border-slate-200 dark:border-slate-700">
               <h3 className="text-xl font-bold">Cards in Deck</h3>
               <div className="flex gap-2">
                 <button onClick={() => { setActiveModal('addCard'); setModalData({ deckId: deck.id }); }} className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-bold flex items-center gap-2 hover:bg-indigo-700 transition-colors"><Plus size={16}/> Add Card</button>
@@ -1273,6 +1322,8 @@ export default function App() {
       );
     }
 
+    const rootDecks = decks.filter(d => !d.parentId);
+
     return (
       <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
         <div className="flex justify-between items-center mb-8">
@@ -1280,7 +1331,7 @@ export default function App() {
            <button onClick={() => setActiveModal('createDeck')} className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-bold flex items-center gap-2 hover:bg-indigo-700 shadow-md hover:shadow-lg transition-all transform hover:-translate-y-0.5"><Plus size={18}/> New Deck</button>
         </div>
         
-        {decks.length === 0 ? (
+        {rootDecks.length === 0 ? (
           <div className="text-center py-20 border-2 border-dashed rounded-2xl border-slate-300 dark:border-slate-700 opacity-70">
             <Folder size={64} className="mx-auto mb-4 text-slate-400" />
             <p className="font-bold text-lg">No decks created yet.</p>
@@ -1288,7 +1339,7 @@ export default function App() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {decks.map(deck => (
+            {rootDecks.map(deck => (
               <div key={deck.id} onClick={() => setActiveDeckId(deck.id)} className={`p-6 rounded-2xl border shadow-sm cursor-pointer transition-all hover:scale-105 hover:shadow-xl ${isDarkMode ? 'bg-slate-800 border-slate-700 hover:border-indigo-500/50' : 'bg-white border-slate-200 hover:border-indigo-300'}`}>
                  <div className="w-12 h-12 rounded-xl bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mb-4">
                    <Copy size={24} />
@@ -1297,7 +1348,7 @@ export default function App() {
                  <p className="text-slate-500 text-sm font-bold">{deck.cards.length} Cards</p>
                  <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-700 flex justify-between items-center">
                     <button className="text-sm font-bold text-indigo-500">Open Deck &rarr;</button>
-                    <button onClick={(e) => { e.stopPropagation(); setDecks(decks.filter(d => d.id !== deck.id)); }} className="text-slate-400 hover:text-red-500 p-2 -mr-2 rounded hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"><Trash2 size={16}/></button>
+                    <button onClick={(e) => handleDeleteDeck(e, deck.id)} className="text-slate-400 hover:text-red-500 p-2 -mr-2 rounded hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"><Trash2 size={16}/></button>
                  </div>
               </div>
             ))}
