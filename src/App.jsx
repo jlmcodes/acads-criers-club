@@ -202,33 +202,35 @@ const DEFAULT_GWA_SCALE = [
   { min: 0, max: 59.99, gwa: '3.00' },
 ];
 
-// Custom Hook to save data to Local Storage tied to the user's ID
+// Custom Hook to save data to Local Storage tied to the user's ID safely
 function usePersistentState(defaultValue, key, uid) {
   const [value, setValue] = React.useState(() => {
-    // If no user is logged in, just return the default empty state
     if (!uid) return defaultValue;
-
-    // Check if we have saved data for this specific user
     const stickyValue = window.localStorage.getItem(`acads_${uid}_${key}`);
     return stickyValue !== null ? JSON.parse(stickyValue) : defaultValue;
   });
 
+  // Track the UID that the current state belongs to
+  const [stateUid, setStateUid] = React.useState(uid);
+
+  // If the user logs in/out, synchronously load the correct data BEFORE rendering
+  // This prevents the empty default state from overwriting the saved data.
+  if (uid !== stateUid) {
+    let nextValue = defaultValue;
+    if (uid) {
+      const stickyValue = window.localStorage.getItem(`acads_${uid}_${key}`);
+      nextValue = stickyValue !== null ? JSON.parse(stickyValue) : defaultValue;
+    }
+    setValue(nextValue);
+    setStateUid(uid);
+  }
+
   React.useEffect(() => {
-    // Whenever the value changes, save it to Local Storage
+    // Only save to storage if we have a valid logged-in user
     if (uid) {
       window.localStorage.setItem(`acads_${uid}_${key}`, JSON.stringify(value));
     }
   }, [key, value, uid]);
-
-  // When the user changes (logs in/out), reload their specific data
-  React.useEffect(() => {
-    if (uid) {
-      const stickyValue = window.localStorage.getItem(`acads_${uid}_${key}`);
-      setValue(stickyValue !== null ? JSON.parse(stickyValue) : defaultValue);
-    } else {
-      setValue(defaultValue);
-    }
-  }, [uid, key]);
 
   return [value, setValue];
 }
