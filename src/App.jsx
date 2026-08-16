@@ -87,6 +87,131 @@ const copyToClipboard = (text, onSuccess) => {
     });
 };
 
+const renderCardBack = (card, isDarkMode) => {
+  switch(card.type) {
+     case 'basic': return <p className="font-bold text-center text-lg leading-snug">{card.answer}</p>;
+     case 'formula': return <p className="font-mono text-center text-2xl font-black tracking-widest">{card.answer}</p>;
+     case 'itemized': return (
+        <div className="w-full h-full flex flex-col justify-center">
+           <ul className="space-y-3 text-sm text-left inline-block mx-auto">
+             {card.items?.map((item, i) => (
+                <li key={i} className="flex gap-3 items-start">
+                   <span className="font-black text-indigo-500 mt-0.5">{i+1}.</span>
+                   <span className="font-bold leading-tight">{item}</span>
+                </li>
+             ))}
+           </ul>
+        </div>
+     );
+     case 'journal': return (
+       <div className="w-full text-sm font-bold">
+         <div className="grid grid-cols-12 gap-2 border-b-2 border-slate-300 dark:border-slate-600 pb-2 mb-3 text-slate-500">
+           <div className="col-span-6">Account</div>
+           <div className="col-span-3 text-right">Debit</div>
+           <div className="col-span-3 text-right">Credit</div>
+         </div>
+         <div className="space-y-2">
+           {card.journal?.map((j, i) => (
+             <div key={i} className="grid grid-cols-12 gap-2 items-center">
+               <div className="col-span-6 italic break-words">{j.title}</div>
+               <div className="col-span-3 text-right text-emerald-600 dark:text-emerald-400">{j.debit || '-'}</div>
+               <div className="col-span-3 text-right text-indigo-600 dark:text-indigo-400">{j.credit || '-'}</div>
+             </div>
+           ))}
+         </div>
+       </div>
+     );
+     case 'taccount': return (
+       <div className="w-full flex flex-col items-center text-sm font-bold">
+         <h4 className="border-b-2 border-slate-400 dark:border-slate-500 w-[90%] text-center pb-2 mb-2 text-lg">{card.taccount?.title}</h4>
+         <div className="flex w-[90%] justify-between relative min-h-[100px]">
+            <div className="absolute left-1/2 top-0 bottom-0 w-[2px] bg-slate-400 dark:bg-slate-500 -translate-x-1/2"></div>
+            <div className="w-1/2 pr-6 text-right space-y-2 py-2">{card.taccount?.left?.map((l,i)=><div key={i}>{l}</div>)}</div>
+            <div className="w-1/2 pl-6 text-left space-y-2 py-2">{card.taccount?.right?.map((r,i)=><div key={i}>{r}</div>)}</div>
+         </div>
+       </div>
+     );
+     default: return null;
+  }
+};
+
+const ActiveStudySession = ({ deck, setSessionState, isDarkMode }) => {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [isFlipped, setIsFlipped] = useState(false);
+  
+  const card = deck.cards[currentIndex];
+
+  if(!card) {
+     return (
+        <div className="text-center mt-20 animate-in fade-in duration-500">
+           <h2 className="text-3xl font-black mb-4">You've finished this deck!</h2>
+           <button onClick={() => setSessionState(null)} className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 transition-colors text-white font-bold rounded-xl shadow-lg">Go Back</button>
+        </div>
+     )
+  }
+
+  return (
+     <div className="max-w-3xl mx-auto mt-4 flex flex-col items-center animate-in fade-in zoom-in-95 duration-300">
+        <div className="flex w-full items-center justify-between mb-8">
+           <button onClick={() => setSessionState(null)} className="text-slate-500 hover:text-slate-900 dark:hover:text-white font-bold flex items-center gap-2 transition-colors"><ArrowLeft size={16}/> End Study Session</button>
+           <div className="flex items-center gap-4">
+              <span className="px-4 py-1.5 bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400 rounded-full font-bold text-sm">
+                 Card {currentIndex + 1} of {deck.cards.length}
+              </span>
+           </div>
+        </div>
+        
+        {/* The Flip Card */}
+        <div className="perspective-1000 w-full h-[450px] mb-10 cursor-pointer" onClick={() => setIsFlipped(!isFlipped)}>
+           <div className={`relative w-full h-full transition-transform duration-500 transform-style-3d shadow-2xl rounded-3xl ${isFlipped ? 'rotate-y-180' : ''}`}>
+              
+              {/* Front */}
+              <div className={`absolute inset-0 backface-hidden rounded-3xl border-2 p-10 flex flex-col items-center justify-center text-center ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                  <span className="absolute top-6 left-6 px-3 py-1 bg-slate-100 dark:bg-slate-900 rounded-lg text-xs font-bold uppercase tracking-widest text-slate-500">{card.type}</span>
+                  <h2 className="text-4xl font-black leading-tight text-slate-800 dark:text-white max-h-full overflow-y-auto custom-scrollbar px-4">{card.question}</h2>
+                  <p className="absolute bottom-6 text-sm font-bold text-slate-400 animate-pulse flex items-center gap-2"><Quote size={14}/> Click to flip</p>
+              </div>
+
+              {/* Back */}
+              <div className={`absolute inset-0 backface-hidden rotate-y-180 rounded-3xl border-2 p-10 flex flex-col items-center justify-center ${isDarkMode ? 'bg-slate-800 border-indigo-500/50' : 'bg-indigo-50 border-indigo-300'}`}>
+                  <div className="w-full h-full overflow-y-auto custom-scrollbar flex flex-col items-center justify-center">
+                      {renderCardBack(card, isDarkMode)}
+                  </div>
+                  <p className="absolute bottom-6 text-sm font-bold text-indigo-400/80 flex items-center gap-2"><Quote size={14}/> Click to flip back</p>
+              </div>
+           </div>
+        </div>
+
+        {/* Controls */}
+        <div className="flex gap-4 w-full max-w-md">
+            <button 
+              onClick={() => {setIsFlipped(false); setTimeout(()=>setCurrentIndex(Math.max(0, currentIndex - 1)), 200)}} 
+              disabled={currentIndex === 0} 
+              className="flex-1 py-4 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-2xl disabled:opacity-50 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors flex justify-center items-center gap-2"
+            >
+              <ChevronLeft size={20}/> Previous
+            </button>
+            
+            {currentIndex === deck.cards.length - 1 ? (
+               <button 
+                 onClick={() => setSessionState(null)}
+                 className="flex-1 py-4 bg-emerald-500 text-white font-bold rounded-2xl hover:bg-emerald-600 transition-colors flex justify-center items-center gap-2 shadow-lg shadow-emerald-500/30"
+               >
+                 Finish <CheckCircle size={20}/>
+               </button>
+            ) : (
+               <button 
+                 onClick={() => {setIsFlipped(false); setTimeout(()=>setCurrentIndex(prev => prev + 1), 200)}} 
+                 className="flex-1 py-4 bg-indigo-600 text-white font-bold rounded-2xl hover:bg-indigo-700 transition-colors flex justify-center items-center gap-2 shadow-lg shadow-indigo-500/30"
+               >
+                 Next <ChevronRight size={20}/>
+               </button>
+            )}
+        </div>
+     </div>
+  )
+}
+
 const QuizExportButton = ({ quiz, isDarkMode }) => {
   const [copied, setCopied] = useState(false);
   const handleExport = () => {
@@ -890,6 +1015,8 @@ export default function App() {
   
   const [quizzes, setQuizzes] = useFirestoreState([], 'quizzes', currentUid);
   const [activeQuizSession, setActiveQuizSession] = useState(null);
+  const [activeStudySession, setActiveStudySession] = useState(null);
+  const [inlineFlippedCards, setInlineFlippedCards] = useState({});
   
   const [notes, setNotes] = useFirestoreState([], 'notes', currentUid);
 
@@ -1382,6 +1509,12 @@ export default function App() {
       }
     };
 
+    if (activeStudySession) {
+       const deck = decks.find(d => d.id === activeStudySession);
+       if (deck) return <ActiveStudySession deck={deck} setSessionState={setActiveStudySession} isDarkMode={isDarkMode} />;
+       else setActiveStudySession(null);
+    }
+
     if (activeDeckId) {
       const deck = decks.find(d => d.id === activeDeckId);
       if(!deck) { setActiveDeckId(null); return null; }
@@ -1427,6 +1560,9 @@ export default function App() {
            <div className="flex justify-between items-center mb-6 pt-6 border-t border-slate-200 dark:border-slate-700">
               <h3 className="text-xl font-bold">Cards in Deck</h3>
               <div className="flex gap-2">
+                {deck.cards.length > 0 && (
+                   <button onClick={() => setActiveStudySession(deck.id)} className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-bold flex items-center gap-2 hover:bg-emerald-700 transition-colors"><Play size={16}/> Study Deck</button>
+                )}
                 <button onClick={() => { setActiveModal('addCard'); setModalData({ deckId: deck.id }); }} className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-bold flex items-center gap-2 hover:bg-indigo-700 transition-colors"><Plus size={16}/> Add Card</button>
               </div>
            </div>
@@ -1439,17 +1575,34 @@ export default function App() {
            ) : (
              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {deck.cards.map(card => (
-                  <div key={card.id} className={`p-6 rounded-2xl border shadow-sm flex flex-col relative group ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                     <span className="absolute top-4 right-4 text-xs font-bold text-slate-400 uppercase tracking-widest bg-slate-100 dark:bg-slate-900 px-2 py-1 rounded">{card.type}</span>
-                     <h4 className="font-bold text-lg mb-4 pr-12">{card.question}</h4>
-                     
-                     <div className="mt-auto pt-4 border-t border-slate-100 dark:border-slate-700/50">
-                        <button className="text-sm font-bold text-indigo-500 flex items-center gap-1 hover:underline"><Eye size={14}/> Preview Answer</button>
-                     </div>
-                     <button onClick={() => {
-                        const newDecks = decks.map(d => d.id === deck.id ? {...d, cards: d.cards.filter(c => c.id !== card.id)} : d);
-                        setDecks(newDecks);
-                     }} className="absolute bottom-4 right-4 text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-2 rounded hover:bg-red-50 dark:hover:bg-red-500/10"><Trash2 size={16}/></button>
+                  <div key={card.id} className="perspective-1000 w-full h-[280px]">
+                    <div className={`relative w-full h-full transition-transform duration-500 transform-style-3d ${inlineFlippedCards[card.id] ? 'rotate-y-180' : ''}`}>
+                       
+                       {/* Front */}
+                       <div className={`absolute inset-0 backface-hidden p-6 rounded-2xl border shadow-sm flex flex-col group ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                          <span className="absolute top-4 right-4 text-xs font-bold text-slate-400 uppercase tracking-widest bg-slate-100 dark:bg-slate-900 px-2 py-1 rounded">{card.type}</span>
+                          <h4 className="font-bold text-lg mb-4 pr-12 overflow-y-auto custom-scrollbar flex-1">{card.question}</h4>
+                          
+                          <div className="mt-auto pt-4 border-t border-slate-100 dark:border-slate-700/50 flex justify-between items-center">
+                             <button onClick={(e) => { e.stopPropagation(); setInlineFlippedCards(prev => ({...prev, [card.id]: true})) }} className="text-sm font-bold text-indigo-500 flex items-center gap-1 hover:underline"><Eye size={14}/> Preview Answer</button>
+                             <button onClick={(e) => {
+                                e.stopPropagation();
+                                const newDecks = decks.map(d => d.id === deck.id ? {...d, cards: d.cards.filter(c => c.id !== card.id)} : d);
+                                setDecks(newDecks);
+                             }} className="text-slate-400 hover:text-red-500 p-2 rounded hover:bg-red-50 dark:hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={16}/></button>
+                          </div>
+                       </div>
+
+                       {/* Back */}
+                       <div className={`absolute inset-0 backface-hidden rotate-y-180 p-6 rounded-2xl border shadow-sm flex flex-col group ${isDarkMode ? 'bg-slate-700 border-indigo-500/30' : 'bg-indigo-50 border-indigo-200'}`}>
+                          <div className="overflow-y-auto custom-scrollbar flex-1 mb-4 flex items-center justify-center">
+                              {renderCardBack(card, isDarkMode)}
+                          </div>
+                          <div className="mt-auto pt-4 border-t border-indigo-200 dark:border-slate-600 flex justify-between items-center">
+                             <button onClick={(e) => { e.stopPropagation(); setInlineFlippedCards(prev => ({...prev, [card.id]: false})) }} className="text-sm font-bold text-indigo-500 flex items-center gap-1 hover:underline"><EyeOff size={14}/> Show Question</button>
+                          </div>
+                       </div>
+                    </div>
                   </div>
                 ))}
              </div>
@@ -1853,7 +2006,7 @@ export default function App() {
                </div>
             )}
             <div className={`flex items-center gap-3 px-5 py-2.5 rounded-xl text-sm font-bold border shadow-sm transition-colors ${isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-700'}`}>
-              <Clock size={16} className="text-indigo-500" /> 
+              <Clock size={16} className="textindigo-500" /> 
               <span>
                 {currentTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' })} 
                 <span className="opacity-50 hidden sm:inline"> | {currentTime.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</span>
@@ -1983,6 +2136,11 @@ export default function App() {
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(156, 163, 175, 0.5); border-radius: 10px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(156, 163, 175, 0.8); }
+        
+        .perspective-1000 { perspective: 1000px; }
+        .transform-style-3d { transform-style: preserve-3d; }
+        .backface-hidden { backface-visibility: hidden; }
+        .rotate-y-180 { transform: rotateY(180deg); }
       `}} />
     </div>
   );
