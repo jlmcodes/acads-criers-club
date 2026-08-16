@@ -151,7 +151,7 @@ const ActiveStudySession = ({ deck, setSessionState, isDarkMode }) => {
   }
 
   return (
-     <div className="max-w-3xl mx-auto mt-4 flex flex-col items-center animate-in fade-in zoom-in-95 duration-300">
+     <div className="max-w-5xl mx-auto mt-4 flex flex-col items-center animate-in fade-in zoom-in-95 duration-300">
         <div className="flex w-full items-center justify-between mb-8">
            <button onClick={() => setSessionState(null)} className="text-slate-500 hover:text-slate-900 dark:hover:text-white font-bold flex items-center gap-2 transition-colors"><ArrowLeft size={16}/> End Study Session</button>
            <div className="flex items-center gap-4">
@@ -161,8 +161,8 @@ const ActiveStudySession = ({ deck, setSessionState, isDarkMode }) => {
            </div>
         </div>
         
-        {/* The Flip Card */}
-        <div className="perspective-1000 w-full h-[450px] mb-10 cursor-pointer" onClick={() => setIsFlipped(!isFlipped)}>
+        {/* The Flip Card - Now Large and Landscape */}
+        <div className="perspective-1000 w-full max-w-4xl h-[350px] md:h-[450px] lg:h-[500px] mb-10 cursor-pointer" onClick={() => setIsFlipped(!isFlipped)}>
            <div className={`relative w-full h-full transition-transform duration-500 transform-style-3d shadow-2xl rounded-3xl ${isFlipped ? 'rotate-y-180' : ''}`}>
               
               {/* Front */}
@@ -1007,16 +1007,27 @@ export default function App() {
   const [decks, setDecks] = useFirestoreState([], 'decks', currentUid);
   const [activeDeckId, setActiveDeckId] = useState(null);
   
-  const [grades, setGrades] = useFirestoreState(
+  const [rawGrades, setGrades] = useFirestoreState(
     { subjects: [], periods: [], assessments: [], scale: DEFAULT_GWA_SCALE },
     'grades',
     currentUid
   );
+
+  // DATA SANITIZER: Prevents white screen crashes if older, corrupted data is downloaded from another device
+  const grades = useMemo(() => {
+     if (!rawGrades || typeof rawGrades !== 'object' || Array.isArray(rawGrades)) {
+         return { subjects: [], periods: [], assessments: [], scale: DEFAULT_GWA_SCALE };
+     }
+     return {
+         subjects: Array.isArray(rawGrades.subjects) ? rawGrades.subjects : [],
+         periods: Array.isArray(rawGrades.periods) ? rawGrades.periods : [],
+         assessments: Array.isArray(rawGrades.assessments) ? rawGrades.assessments : [],
+         scale: Array.isArray(rawGrades.scale) && rawGrades.scale.length > 0 ? rawGrades.scale : DEFAULT_GWA_SCALE
+     };
+  }, [rawGrades]);
   
   const [quizzes, setQuizzes] = useFirestoreState([], 'quizzes', currentUid);
   const [activeQuizSession, setActiveQuizSession] = useState(null);
-  const [activeStudySession, setActiveStudySession] = useState(null);
-  const [inlineFlippedCards, setInlineFlippedCards] = useState({});
   
   const [notes, setNotes] = useFirestoreState([], 'notes', currentUid);
 
